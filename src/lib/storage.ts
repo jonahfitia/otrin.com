@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CollectionName } from '@/types';
 
-const PREFIX = '@volako/';
-const QUEUE_KEY = '@volako/sync_queue';
+const PREFIX = '@otrin.com/';
+const QUEUE_KEY = '@otrin.com/sync_queue';
 
 export async function loadCollection<T>(name: CollectionName): Promise<T[]> {
   const raw = await AsyncStorage.getItem(PREFIX + name);
@@ -80,6 +80,6 @@ export async function removeSyncOp(opId: string): Promise<void> {
 
 export async function clearAllData(): Promise<void> {
   const keys = await AsyncStorage.getAllKeys();
-  const volakoKeys = keys.filter((k) => k.startsWith('@volako/'));
-  await AsyncStorage.multiRemove(volakoKeys);
+  const otrincomKeys = keys.filter((k) => k.startsWith('@otrin.com/'));
+  await AsyncStorage.multiRemove(otrincomKeys);
 }

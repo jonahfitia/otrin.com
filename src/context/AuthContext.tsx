@@ -98,17 +98,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return unsub;
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string, displayName?: string) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    if (displayName) {
-      await updateProfile(cred.user, { displayName });
-    }
-    await seedUserData(cred.user.uid);
-  }, []);
+  const signUp = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      try {
+        console.log("Registering:", email);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
-  }, []);
+        const cred = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
+
+        console.log("User created:", cred.user.uid);
+        if (displayName) {
+          await updateProfile(cred.user, { displayName });
+        }
+
+        await seedUserData(cred.user.uid);
+      } catch (error: any) {
+        console.log("Firebase code:", error.code);
+        console.log("Firebase message:", error.message);
+        console.log(error);
+      }
+    },
+    []
+  );
+
+  const signIn = useCallback(
+    async (email: string, password: string): Promise<void> => {
+      console.log("EMAIL:", JSON.stringify(email));
+      console.log("PASSWORD LENGTH:", password.length);
+
+      try {
+        await signInWithEmailAndPassword(auth, email.trim(), password);
+        console.log("LOGIN SUCCESS");
+      } catch (error: any) {
+        console.log("ERROR CODE:", error.code);
+        console.log("ERROR MESSAGE:", error.message);
+        throw error;
+      }
+    },
+    [auth]
+  );
 
   const signOut = useCallback(async () => {
     if (user) {

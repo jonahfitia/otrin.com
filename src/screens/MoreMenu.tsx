@@ -7,6 +7,8 @@ const MENU_ITEMS = [
   { label: 'Budget', icon: 'bar-chart' as const, route: 'Budget', color: colors.amber },
   { label: 'Objectifs', icon: 'trophy' as const, route: 'Goals', color: colors.green },
   { label: 'Catégories', icon: 'pricetags' as const, route: 'Categories', color: colors.blue },
+  { label: 'Prêts', icon: 'cash' as const, route: 'Loans', color: colors.orange },
+  { label: 'Prévisions', icon: 'trending-up' as const, route: 'Forecast', color: colors.teal },
   { label: 'Récurrentes', icon: 'repeat' as const, route: 'Recurring', color: colors.purple },
   { label: 'Simulations', icon: 'flask' as const, route: 'Simulation', color: colors.teal },
   { label: 'Paramètres', icon: 'settings' as const, route: 'Settings', color: colors.gray },

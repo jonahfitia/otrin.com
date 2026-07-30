@@ -34,8 +34,10 @@ export default function LoginScreen() {
     setError('');
     try {
       if (mode === 'login') {
+        console.log("----login----Signing in user with email:", email);
         await signIn(email, password);
       } else {
+        console.log("----signup----Registering user with email:", email, "and displayName:", displayName);
         await signUp(email, password, displayName || undefined);
       }
     } catch (err: any) {
@@ -55,7 +57,7 @@ export default function LoginScreen() {
           <View style={styles.logo}>
             <Text style={styles.logoText}>V</Text>
           </View>
-          <Text style={styles.title}>Volako</Text>
+          <Text style={styles.title}>Otrin.com</Text>
           <Text style={styles.subtitle}>Gérez vos finances, en ligne et hors ligne</Text>
         </View>
 
@@ -72,14 +74,12 @@ export default function LoginScreen() {
             label="Email"
             value={email}
             onChangeText={setEmail}
-            placeholder="email@exemple.com"
             keyboardType="email-address"
           />
           <Input
             label="Mot de passe"
             value={password}
             onChangeText={setPassword}
-            placeholder="••••••••"
             secureTextEntry
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}

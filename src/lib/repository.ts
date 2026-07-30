@@ -13,6 +13,8 @@ import {
   SimulationItem,
   Notification,
   Settings,
+  Loan,
+  LoanRepayment,
   CollectionName,
 } from '@/types';
 
@@ -85,4 +87,10 @@ export function notificationsRepo(userId: string) {
 }
 export function settingsRepo(userId: string) {
   return new Repository<Settings>(userId, 'settings');
+}
+export function loansRepo(userId: string) {
+  return new Repository<Loan>(userId, 'loans');
+}
+export function loanRepaymentsRepo(userId: string) {
+  return new Repository<LoanRepayment>(userId, 'loan_repayments');
 }

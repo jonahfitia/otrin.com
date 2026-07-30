@@ -1,8 +1,8 @@
-# Volako Mobile — Documentation Technique
+# Otrin.com Mobile — Documentation Technique
 
 ## Vue d'ensemble
 
-**Volako Mobile** est l'application mobile (React Native / Expo) de gestion de finances personnelles Volako. Elle reproduit toutes les fonctionnalités de la version web (Next.js) tout en ajoutant une capacité de fonctionnement **hors ligne** et une **synchronisation cloud** via Firebase.
+**Otrin.com Mobile** est l'application mobile (React Native / Expo) de gestion de finances personnelles Otrin.com. Elle reproduit toutes les fonctionnalités de la version web (Next.js) tout en ajoutant une capacité de fonctionnement **hors ligne** et une **synchronisation cloud** via Firebase.
 
 - **Plateforme** : Android & iOS (via Expo)
 - **Framework** : React Native 0.74 + Expo SDK 51

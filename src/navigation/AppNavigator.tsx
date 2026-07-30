@@ -18,6 +18,8 @@ import ReportsScreen from '@/screens/ReportsScreen';
 import RecurringScreen from '@/screens/RecurringScreen';
 import SettingsScreen from '@/screens/SettingsScreen';
 import SimulationScreen from '@/screens/SimulationScreen';
+import LoansScreen from '@/screens/LoansScreen';
+import ForecastScreen from '@/screens/ForecastScreen';
 
 import { colors } from '@/components/theme';
 
@@ -87,6 +89,8 @@ function MoreStack() {
       <Stack.Screen name="Categories" component={CategoriesScreen} />
       <Stack.Screen name="Recurring" component={RecurringScreen} />
       <Stack.Screen name="Simulation" component={SimulationScreen} />
+      <Stack.Screen name="Loans" component={LoansScreen} />
+      <Stack.Screen name="Forecast" component={ForecastScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
     </Stack.Navigator>
   );

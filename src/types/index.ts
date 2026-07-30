@@ -124,6 +124,34 @@ export interface SimulationItem {
   _synced?: boolean;
 }
 
+export type LoanStatus = 'pending' | 'partially_repaid' | 'repaid' | 'cancelled';
+
+export interface Loan {
+  id: string;
+  user_id: string;
+  person_name: string;
+  amount: number;
+  remaining_amount: number;
+  date: string;
+  expected_repayment_date: string;
+  status: LoanStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  _synced?: boolean;
+}
+
+export interface LoanRepayment {
+  id: string;
+  user_id: string;
+  loan_id: string;
+  amount: number;
+  date: string;
+  notes: string | null;
+  created_at: string;
+  _synced?: boolean;
+}
+
 export interface Notification {
   id: string;
   user_id: string;
@@ -170,7 +198,9 @@ export const DEFAULT_EXPENSE_CATEGORIES = [
   { name: 'Eau', icon: 'droplets', color: '#3b82f6' },
   { name: 'Électricité', icon: 'zap', color: '#f59e0b' },
   { name: 'Santé', icon: 'heart-pulse', color: '#f43f5e' },
-  { name: 'Église', icon: 'church', color: '#7c3aed' },
+  { name: 'Dîme', icon: 'church', color: '#7c3aed' },
+  { name: 'Offrandes', icon: 'heart', color: '#ec4899' },
+  { name: 'Église', icon: 'add-circle', color: '#7c3aed' },
   { name: 'Famille', icon: 'users', color: '#10b981' },
   { name: 'Éducation', icon: 'graduation-cap', color: '#0ea5e9' },
   { name: 'Loisirs', icon: 'gamepad-2', color: '#a855f7' },
@@ -191,4 +221,6 @@ export type CollectionName =
   | 'simulations'
   | 'simulation_items'
   | 'notifications'
-  | 'settings';
+  | 'settings'
+  | 'loans'
+  | 'loan_repayments';

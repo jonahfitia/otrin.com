@@ -175,6 +175,8 @@ export async function pullAllData(userId: string): Promise<void> {
     'simulation_items',
     'notifications',
     'settings',
+    'loans',
+    'loan_repayments',
   ];
 
   await Promise.all(collections.map((c) => pullCollection(userId, c)));

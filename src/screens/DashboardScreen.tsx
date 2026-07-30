@@ -9,9 +9,9 @@ import {
 } from 'react-native';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
-import { accountsRepo, transactionsRepo, budgetsRepo } from '@/lib/repository';
+import { accountsRepo, transactionsRepo, budgetsRepo, loansRepo } from '@/lib/repository';
 import { formatCurrency, formatDate, formatDateShort, getCurrentMonth } from '@/lib/formatters';
-import { Account, Transaction } from '@/types';
+import { Account, Transaction, Loan } from '@/types';
 import { Card, LoadingSpinner, EmptyState } from '@/components/ui';
 import { colors } from '@/components/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +24,9 @@ interface DashboardStats {
   budgetTotal: number;
   budgetSpent: number;
   savingsRate: number;
+  tithe: number;
+  offerings: number;
+  availableIncome: number;
 }
 
 export default function DashboardScreen() {
@@ -37,8 +40,12 @@ export default function DashboardScreen() {
     budgetTotal: 0,
     budgetSpent: 0,
     savingsRate: 0,
+    tithe: 0,
+    offerings: 0,
+    availableIncome: 0,
   });
   const [recentTx, setRecentTx] = useState<Transaction[]>([]);
+  const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -46,10 +53,11 @@ export default function DashboardScreen() {
 
   const loadData = useCallback(async () => {
     if (!user) return;
-    const [accounts, txs, budgets] = await Promise.all([
+    const [accounts, txs, budgets, loansData] = await Promise.all([
       accountsRepo(user.uid).getAll(),
       transactionsRepo(user.uid).getAll(),
       budgetsRepo(user.uid).getAll(),
+      loansRepo(user.uid).getAll(),
     ]);
 
     const startOfMonth = `${year}-${String(month).padStart(2, '0')}-01`;
@@ -65,10 +73,15 @@ export default function DashboardScreen() {
     const savings = income - expenses;
     const savingsRate = income > 0 ? (savings / income) * 100 : 0;
 
-    setStats({ balance: totalBalance, income, expenses, savings, budgetTotal, budgetSpent: expenses, savingsRate });
+    const tithe = income * 0.1;
+    const offerings = income * 0.1;
+    const availableIncome = income - tithe - offerings;
+
+    setStats({ balance: totalBalance, income, expenses, savings, budgetTotal, budgetSpent: expenses, savingsRate, tithe, offerings, availableIncome });
     setRecentTx(
       [...txs].sort((a, b) => (b.date + b.created_at).localeCompare(a.date + a.created_at)).slice(0, 8),
     );
+    setLoans(loansData);
     setLoading(false);
   }, [user, month, year]);
 
@@ -115,6 +128,53 @@ export default function DashboardScreen() {
           </Card>
         ))}
       </View>
+
+      {(() => {
+        const activeLoans = loans.filter((l) => l.status !== 'repaid' && l.status !== 'cancelled');
+        const totalOutstanding = activeLoans.reduce((s, l) => s + l.remaining_amount, 0);
+        const overdueCount = activeLoans.filter((l) => new Date(l.expected_repayment_date) < new Date()).length;
+        if (activeLoans.length === 0) return null;
+        return (
+          <Card style={styles.loansSummaryCard}>
+            <View style={styles.loansSummaryHeader}>
+              <Ionicons name="cash" size={20} color={colors.orange} />
+              <Text style={styles.loansSummaryTitle}>Prêts en cours</Text>
+            </View>
+            <View style={styles.loansSummaryRow}>
+              <Text style={styles.loansSummaryLabel}>{activeLoans.length} prêt{activeLoans.length > 1 ? 's' : ''}</Text>
+              <Text style={styles.loansSummaryValue}>{formatCurrency(totalOutstanding, currency)}</Text>
+            </View>
+            {overdueCount > 0 && (
+              <View style={styles.loansSummaryRow}>
+                <Text style={[styles.loansSummaryLabel, { color: colors.red }]}>Dont {overdueCount} en retard</Text>
+                <Ionicons name="alert-circle" size={16} color={colors.red} />
+              </View>
+            )}
+          </Card>
+        );
+      })()}
+
+      {stats.income > 0 && (
+        <Card style={styles.religionCard}>
+          <View style={styles.religionHeader}>
+            <Ionicons name="church" size={20} color={colors.primary} />
+            <Text style={styles.religionTitle}>Contributions religieuses</Text>
+          </View>
+          <View style={styles.religionRow}>
+            <Text style={styles.religionLabel}>Dîme (10%)</Text>
+            <Text style={styles.religionValue}>{formatCurrency(stats.tithe, currency)}</Text>
+          </View>
+          <View style={styles.religionRow}>
+            <Text style={styles.religionLabel}>Offrandes (10%)</Text>
+            <Text style={styles.religionValue}>{formatCurrency(stats.offerings, currency)}</Text>
+          </View>
+          <View style={styles.religionDivider} />
+          <View style={styles.religionRow}>
+            <Text style={styles.religionLabelBold}>Solde réellement disponible</Text>
+            <Text style={styles.religionValueBold}>{formatCurrency(stats.availableIncome, currency)}</Text>
+          </View>
+        </Card>
+      )}
 
       <Card style={styles.section}>
         <Text style={styles.sectionTitle}>Dernières opérations</Text>
@@ -239,5 +299,83 @@ const styles = StyleSheet.create({
   txAmount: {
     fontSize: 14,
     fontWeight: '700',
+  },
+  loansSummaryCard: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: colors.orange + '30',
+  },
+  loansSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  loansSummaryTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  loansSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  loansSummaryLabel: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  loansSummaryValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.orange,
+  },
+  religionCard: {
+    marginTop: 16,
+    backgroundColor: colors.primaryLight,
+    borderWidth: 1,
+    borderColor: colors.primary + '30',
+  },
+  religionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  religionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  religionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  religionLabel: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  religionValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  religionDivider: {
+    height: 1,
+    backgroundColor: colors.primary + '30',
+    marginVertical: 6,
+  },
+  religionLabelBold: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  religionValueBold: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.primaryDark,
   },
 });
