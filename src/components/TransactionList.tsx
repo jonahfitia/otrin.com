@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
@@ -6,6 +7,7 @@ import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
+import TablePagination from '@mui/material/TablePagination';
 import TableRow from '@mui/material/TableRow';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
@@ -18,6 +20,7 @@ import type { Transaction } from '../supabase';
 interface TransactionListProps {
   transactions: Transaction[];
   onDelete: () => void;
+  soldeActuel?: number;
 }
 
 function formatAmount(n: number) {
@@ -28,7 +31,16 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-export default function TransactionList({ transactions, onDelete }: TransactionListProps) {
+export default function TransactionList({ transactions, onDelete, soldeActuel = 0 }: TransactionListProps) {
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [prevCount, setPrevCount] = useState(transactions.length);
+
+  if (prevCount !== transactions.length) {
+    setPrevCount(transactions.length);
+    setPage(0);
+  }
+
   async function handleDelete(id: string) {
     await supabase.from('transactions').delete().eq('id', id);
     onDelete();
@@ -42,9 +54,19 @@ export default function TransactionList({ transactions, onDelete }: TransactionL
     );
   }
 
+  const shown = transactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+
+  const balanceById = new Map<string, number>();
+  let running = soldeActuel;
+  for (const t of transactions) {
+    balanceById.set(t.id, running);
+    running -= t.type === 'entree' ? t.amount : -t.amount;
+  }
+
   return (
-    <TableContainer>
-      <Table size="small">
+    <Box>
+      <TableContainer>
+        <Table size="small">
         <TableHead>
           <TableRow sx={{ '& th': { fontWeight: 700, color: 'text.secondary', fontSize: '0.75rem', textTransform: 'uppercase' } }}>
             <TableCell>Date</TableCell>
@@ -52,11 +74,12 @@ export default function TransactionList({ transactions, onDelete }: TransactionL
             <TableCell>Catégorie</TableCell>
             <TableCell>Désignation</TableCell>
             <TableCell align="right">Montant</TableCell>
+            <TableCell align="right">Solde</TableCell>
             <TableCell align="center">Action</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {transactions.map(t => (
+          {shown.map(t => (
             <TableRow
               key={t.id}
               hover
@@ -107,6 +130,15 @@ export default function TransactionList({ transactions, onDelete }: TransactionL
                   {formatAmount(t.amount)}
                 </Typography>
               </TableCell>
+              <TableCell align="right">
+                <Typography
+                  variant="body2"
+                  fontWeight={600}
+                  color={(balanceById.get(t.id) ?? 0) >= 0 ? 'primary.main' : 'warning.dark'}
+                >
+                  {formatAmount(balanceById.get(t.id) ?? 0)}
+                </Typography>
+              </TableCell>
               <TableCell align="center">
                 <Tooltip title="Supprimer">
                   <IconButton
@@ -122,6 +154,25 @@ export default function TransactionList({ transactions, onDelete }: TransactionL
           ))}
         </TableBody>
       </Table>
-    </TableContainer>
+      </TableContainer>
+      <TablePagination
+        component="div"
+        count={transactions.length}
+        page={page}
+        onPageChange={(_, newPage) => setPage(newPage)}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={e => {
+          setRowsPerPage(parseInt(e.target.value, 10));
+          setPage(0);
+        }}
+        rowsPerPageOptions={[5, 10, 25, 50, 100]}
+        labelRowsPerPage="Lignes par page"
+        labelDisplayedRows={({ from, to, count }) => `${from}–${to} sur ${count}`}
+        sx={{
+          '& .MuiTablePagination-selectLabel': { mb: 0 },
+          '& .MuiTablePagination-displayedRows': { mb: 0 },
+        }}
+      />
+    </Box>
   );
 }

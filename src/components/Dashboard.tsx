@@ -21,14 +21,15 @@ import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 import { supabase } from '../supabase';
 import type { Transaction } from '../supabase';
 import TransactionList from './TransactionList';
 
-type FilterMode = 'month' | 'year' | 'range';
+type FilterMode = 'month' | 'year' | 'range' | 'all';
+type Granularity = 'day' | 'week' | 'month' | 'year';
 
 const MONTHS = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -46,6 +47,59 @@ function formatAmount(n: number) {
   return new Intl.NumberFormat('fr-MG').format(n) + ' Ar';
 }
 
+function pad2(n: number) {
+  return String(n).padStart(2, '0');
+}
+
+function getISOWeek(d: Date) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - dayNum + 3);
+  const firstThursday = date.getTime();
+  date.setUTCMonth(0, 1);
+  if (date.getUTCDay() !== 4) {
+    date.setUTCMonth(0, 1 + ((4 - date.getUTCDay()) + 7) % 7);
+  }
+  return {
+    year: date.getUTCFullYear(),
+    week: 1 + Math.ceil((firstThursday - date.getTime()) / 604800000),
+  };
+}
+
+interface PeriodPoint {
+  key: string;
+  label: string;
+  entree: number;
+  sortie: number;
+}
+
+function groupByGranularity(transactions: Transaction[], granularity: Granularity): PeriodPoint[] {
+  const map = new Map<string, PeriodPoint>();
+  for (const t of transactions) {
+    const d = new Date(t.transaction_date + 'T00:00:00');
+    let key: string;
+    let label: string;
+    if (granularity === 'year') {
+      key = `${d.getFullYear()}`;
+      label = key;
+    } else if (granularity === 'month') {
+      key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+      label = `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
+    } else if (granularity === 'week') {
+      const iso = getISOWeek(d);
+      key = `${iso.year}-W${pad2(iso.week)}`;
+      label = `S${iso.week} ${iso.year}`;
+    } else {
+      key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      label = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+    }
+    const item = map.get(key) ?? { key, label, entree: 0, sortie: 0 };
+    item[t.type] += t.amount;
+    map.set(key, item);
+  }
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
 interface DashboardProps {
   refreshKey: number;
 }
@@ -59,7 +113,10 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
     new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
   );
   const [rangeEnd, setRangeEnd] = useState(now.toISOString().split('T')[0]);
+  const [granularity, setGranularity] = useState<Granularity>('month');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [summary, setSummary] = useState({ entree: 0, sortie: 0 });
+  const [summaryLoaded, setSummaryLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
@@ -79,7 +136,7 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
       const start = `${selectedYear}-01-01`;
       const end = `${selectedYear}-12-31`;
       query = query.gte('transaction_date', start).lte('transaction_date', end);
-    } else {
+    } else if (filterMode === 'range') {
       query = query.gte('transaction_date', rangeStart).lte('transaction_date', rangeEnd);
     }
 
@@ -88,20 +145,30 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
     setLoading(false);
   }, [filterMode, selectedMonth, selectedYear, rangeStart, rangeEnd]);
 
-  useEffect(() => { load(); }, [load, refreshKey]);
+  async function loadSummary() {
+    const { data } = await supabase.from('transactions').select('type, amount');
+    let entree = 0;
+    let sortie = 0;
+    for (const t of (data ?? [])) {
+      if (t.type === 'entree') entree += t.amount;
+      else sortie += t.amount;
+    }
+    setSummary({ entree, sortie });
+    setSummaryLoaded(true);
+  }
+
+  useEffect(() => {
+    load();
+    void loadSummary();
+  }, [load, refreshKey]);
 
   const totalEntree = transactions.filter(t => t.type === 'entree').reduce((s, t) => s + t.amount, 0);
   const totalSortie = transactions.filter(t => t.type === 'sortie').reduce((s, t) => s + t.amount, 0);
   const balance = totalEntree - totalSortie;
+  const soldeActuel = summary.entree - summary.sortie;
 
-  // Bar chart: group by category
-  const categoryData: Record<string, { name: string; entree: number; sortie: number }> = {};
-  for (const t of transactions) {
-    const catName = t.categories?.name ?? 'Autre';
-    if (!categoryData[catName]) categoryData[catName] = { name: catName, entree: 0, sortie: 0 };
-    categoryData[catName][t.type] += t.amount;
-  }
-  const barData = Object.values(categoryData).sort((a, b) => (b.entree + b.sortie) - (a.entree + a.sortie));
+  // Line chart: evolution over time
+  const lineData = groupByGranularity(transactions, granularity);
 
   // Pie: sortie by category
   const sortieByCategory: Record<string, number> = {};
@@ -115,6 +182,39 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
 
   return (
     <Box>
+      {/* Current balance banner */}
+      <Card sx={{ mb: 3, borderLeft: 6, borderColor: soldeActuel >= 0 ? 'success.main' : 'error.main' }}>
+        <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+            <Box>
+              <Typography variant="overline" sx={{ fontWeight: 700, letterSpacing: 1.5, color: 'text.secondary' }}>
+                Solde actuel
+              </Typography>
+              {summaryLoaded ? (
+                <Typography variant="h4" fontWeight={800} color={soldeActuel >= 0 ? 'success.main' : 'error.main'}>
+                  {formatAmount(soldeActuel)}
+                </Typography>
+              ) : (
+                <CircularProgress size={32} sx={{ mt: 1 }} />
+              )}
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 0.5 }}>
+                <Typography variant="body2" color="success.main" fontWeight={600}>
+                  + {formatAmount(summary.entree)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">cumulés</Typography>
+                <Typography variant="body2" color="error.main" fontWeight={600}>
+                  - {formatAmount(summary.sortie)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">sorties cumulées</Typography>
+              </Stack>
+            </Box>
+            <AccountBalanceWalletIcon
+              sx={{ fontSize: 56, color: soldeActuel >= 0 ? 'success.light' : 'error.light' }}
+            />
+          </Box>
+        </CardContent>
+      </Card>
+
       {/* Filter controls */}
       <Card sx={{ mb: 3 }}>
         <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
@@ -136,6 +236,10 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
                 variant={filterMode === 'range' ? 'contained' : 'outlined'}
                 onClick={() => setFilterMode('range')}
               >Période</Button>
+              <Button
+                variant={filterMode === 'all' ? 'contained' : 'outlined'}
+                onClick={() => setFilterMode('all')}
+              >Tout</Button>
             </ButtonGroup>
 
             {(filterMode === 'month' || filterMode === 'year') && (
@@ -257,21 +361,50 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
             <>
               {/* Charts */}
               <Grid container spacing={3} sx={{ mb: 3 }}>
-                {barData.length > 0 && (
+                {lineData.length > 0 && (
                   <Grid size={{ xs: 12, lg: 7 }}>
                     <Card>
                       <CardContent>
-                        <Typography variant="h6" gutterBottom>Entrées / Sorties par catégorie</Typography>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: 1,
+                            mb: 2,
+                          }}
+                        >
+                          <Typography variant="h6">Évolution Entrées / Sorties</Typography>
+                          <ButtonGroup size="small" variant="outlined">
+                            <Button
+                              variant={granularity === 'day' ? 'contained' : 'outlined'}
+                              onClick={() => setGranularity('day')}
+                            >Jour</Button>
+                            <Button
+                              variant={granularity === 'week' ? 'contained' : 'outlined'}
+                              onClick={() => setGranularity('week')}
+                            >Semaine</Button>
+                            <Button
+                              variant={granularity === 'month' ? 'contained' : 'outlined'}
+                              onClick={() => setGranularity('month')}
+                            >Mois</Button>
+                            <Button
+                              variant={granularity === 'year' ? 'contained' : 'outlined'}
+                              onClick={() => setGranularity('year')}
+                            >Année</Button>
+                          </ButtonGroup>
+                        </Box>
                         <ResponsiveContainer width="100%" height={300}>
-                          <BarChart data={barData} margin={{ top: 5, right: 10, bottom: 60, left: 10 }}>
+                          <LineChart data={lineData} margin={{ top: 5, right: 10, bottom: 20, left: 10 }}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="name" angle={-40} textAnchor="end" tick={{ fontSize: 11 }} />
+                            <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
                             <YAxis tickFormatter={v => new Intl.NumberFormat('fr-MG', { notation: 'compact' }).format(v as number)} />
-                            <Tooltip formatter={(v) => formatAmount(Number(v))} />
+                            <Tooltip formatter={(v) => formatAmount(Number(v))} contentStyle={{ fontSize: 13 }} />
                             <Legend wrapperStyle={{ paddingTop: 16 }} />
-                            <Bar dataKey="entree" name="Entrées" fill="#2e7d32" radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="sortie" name="Sorties" fill="#c62828" radius={[4, 4, 0, 0]} />
-                          </BarChart>
+                            <Line type="monotone" dataKey="entree" name="Entrées" stroke="#2e7d32" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                            <Line type="monotone" dataKey="sortie" name="Sorties" stroke="#c62828" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                          </LineChart>
                         </ResponsiveContainer>
                       </CardContent>
                     </Card>
@@ -313,7 +446,7 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
                     <Chip label={transactions.length} size="small" sx={{ ml: 1 }} />
                   </Typography>
                   <Divider sx={{ mb: 1 }} />
-                  <TransactionList transactions={transactions} onDelete={load} />
+                  <TransactionList transactions={transactions} onDelete={load} soldeActuel={soldeActuel} />
                 </CardContent>
               </Card>
             </>
