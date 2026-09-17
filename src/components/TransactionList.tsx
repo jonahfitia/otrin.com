@@ -16,11 +16,12 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import { supabase } from '../supabase';
 import type { Transaction } from '../supabase';
+import ConfirmDialog from './ConfirmDialog';
 
 interface TransactionListProps {
   transactions: Transaction[];
   onDelete: () => void;
-  soldeActuel?: number;
+  balanceMap?: Record<string, number>;
 }
 
 function formatAmount(n: number) {
@@ -31,19 +32,30 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-export default function TransactionList({ transactions, onDelete, soldeActuel = 0 }: TransactionListProps) {
+export default function TransactionList({ transactions, onDelete, balanceMap }: TransactionListProps) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [prevCount, setPrevCount] = useState(transactions.length);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   if (prevCount !== transactions.length) {
     setPrevCount(transactions.length);
     setPage(0);
   }
 
-  async function handleDelete(id: string) {
-    await supabase.from('transactions').delete().eq('id', id);
-    onDelete();
+  const deleteTarget = transactions.find(t => t.id === deleteId) ?? null;
+
+  async function handleConfirmDelete() {
+    if (!deleteId) return;
+    setDeleting(true);
+    try {
+      await supabase.from('transactions').delete().eq('id', deleteId);
+      setDeleteId(null);
+      onDelete();
+    } finally {
+      setDeleting(false);
+    }
   }
 
   if (transactions.length === 0) {
@@ -55,13 +67,6 @@ export default function TransactionList({ transactions, onDelete, soldeActuel = 
   }
 
   const shown = transactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-
-  const balanceById = new Map<string, number>();
-  let running = soldeActuel;
-  for (const t of transactions) {
-    balanceById.set(t.id, running);
-    running -= t.type === 'entree' ? t.amount : -t.amount;
-  }
 
   return (
     <Box>
@@ -134,9 +139,9 @@ export default function TransactionList({ transactions, onDelete, soldeActuel = 
                 <Typography
                   variant="body2"
                   fontWeight={600}
-                  color={(balanceById.get(t.id) ?? 0) >= 0 ? 'primary.main' : 'warning.dark'}
+                  color={balanceMap && (balanceMap[t.id] ?? 0) >= 0 ? 'primary.main' : 'warning.dark'}
                 >
-                  {formatAmount(balanceById.get(t.id) ?? 0)}
+                  {balanceMap ? formatAmount(balanceMap[t.id] ?? 0) : '-'}
                 </Typography>
               </TableCell>
               <TableCell align="center">
@@ -144,7 +149,7 @@ export default function TransactionList({ transactions, onDelete, soldeActuel = 
                   <IconButton
                     size="small"
                     color="error"
-                    onClick={() => handleDelete(t.id)}
+                    onClick={() => setDeleteId(t.id)}
                   >
                     <DeleteOutlineIcon fontSize="small" />
                   </IconButton>
@@ -172,6 +177,36 @@ export default function TransactionList({ transactions, onDelete, soldeActuel = 
           '& .MuiTablePagination-selectLabel': { mb: 0 },
           '& .MuiTablePagination-displayedRows': { mb: 0 },
         }}
+      />
+    <ConfirmDialog
+        open={!!deleteTarget}
+        title="Supprimer la transaction"
+        message={
+          deleteTarget ? (
+            <>
+              Supprimer cette transaction ?
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="body2" fontWeight={600}>
+                  {formatDate(deleteTarget.transaction_date)} — {deleteTarget.categories?.name ?? '-'}
+                  {deleteTarget.designations?.name ? ` • ${deleteTarget.designations.name}` : ''}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  fontWeight={700}
+                  color={deleteTarget.type === 'entree' ? 'success.main' : 'error.main'}
+                >
+                  {deleteTarget.type === 'entree' ? '+ ' : '- '}{formatAmount(deleteTarget.amount)}
+                </Typography>
+              </Box>
+            </>
+          ) : ''
+        }
+        confirmLabel="Supprimer"
+        cancelLabel="Annuler"
+        confirmColor="error"
+        loading={deleting}
+        onConfirm={() => void handleConfirmDelete()}
+        onClose={() => !deleting && setDeleteId(null)}
       />
     </Box>
   );

@@ -5,12 +5,22 @@ const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as 
 
 export const supabase = createClient(supabaseUrl, supabasePublishableKey);
 
+let iconColumnEnabled: boolean | null = null;
+
+export async function isIconColumnEnabled(): Promise<boolean> {
+  if (iconColumnEnabled !== null) return iconColumnEnabled;
+  const { error } = await supabase.from('categories').select('icon').limit(1);
+  iconColumnEnabled = !error;
+  return iconColumnEnabled;
+}
+
 export type TransactionType = 'entree' | 'sortie';
 
 export interface Category {
   id: string;
   type: TransactionType;
   name: string;
+  icon: string | null;
 }
 
 export interface Designation {

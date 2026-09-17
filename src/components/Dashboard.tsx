@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import ButtonGroup from '@mui/material/ButtonGroup';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
-import Divider from '@mui/material/Divider';
 import FormControl from '@mui/material/FormControl';
 import Grid from '@mui/material/Grid';
 import InputLabel from '@mui/material/InputLabel';
@@ -16,17 +14,14 @@ import type { SelectChangeEvent } from '@mui/material/Select';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import Autocomplete from '@mui/material/Autocomplete';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import FilterListIcon from '@mui/icons-material/FilterList';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, PieChart, Pie, Cell,
-} from 'recharts';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { supabase } from '../supabase';
 import type { Transaction } from '../supabase';
-import TransactionList from './TransactionList';
 
 type FilterMode = 'month' | 'year' | 'range' | 'all';
 type Granularity = 'day' | 'week' | 'month' | 'year';
@@ -36,7 +31,7 @@ const MONTHS = [
   'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
 ];
 
-const PIE_COLORS = [
+const CHART_COLORS = [
   '#1565c0', '#1976d2', '#42a5f5', '#0288d1', '#01579b',
   '#2e7d32', '#388e3c', '#4caf50', '#66bb6a', '#a5d6a7',
   '#c62828', '#e53935', '#ef5350', '#ff7043', '#ffb300',
@@ -69,8 +64,7 @@ function getISOWeek(d: Date) {
 interface PeriodPoint {
   key: string;
   label: string;
-  entree: number;
-  sortie: number;
+  [category: string]: string | number;
 }
 
 function groupByGranularity(transactions: Transaction[], granularity: Granularity): PeriodPoint[] {
@@ -93,11 +87,46 @@ function groupByGranularity(transactions: Transaction[], granularity: Granularit
       key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
       label = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
     }
-    const item = map.get(key) ?? { key, label, entree: 0, sortie: 0 };
-    item[t.type] += t.amount;
+    const item = map.get(key) ?? { key, label };
+    item[t.type] = Number(item[t.type] ?? 0) + t.amount;
     map.set(key, item);
   }
   return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function groupByGranularityByCategory(transactions: Transaction[], granularity: Granularity, categories: string[]): PeriodPoint[] {
+  const map = new Map<string, PeriodPoint>();
+  for (const t of transactions) {
+    if (t.type !== 'sortie') continue;
+    const catName = t.categories?.name ?? 'Autre';
+    if (categories.length > 0 && !categories.includes(catName)) continue;
+
+    const d = new Date(t.transaction_date + 'T00:00:00');
+    let key: string;
+    let label: string;
+    if (granularity === 'year') {
+      key = `${d.getFullYear()}`;
+      label = key;
+    } else if (granularity === 'month') {
+      key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+      label = `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
+    } else if (granularity === 'week') {
+      const iso = getISOWeek(d);
+      key = `${iso.year}-W${pad2(iso.week)}`;
+      label = `S${iso.week} ${iso.year}`;
+    } else {
+      key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      label = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+    }
+    const item = map.get(key) ?? { key, label };
+    item[catName] = Number(item[catName] ?? 0) + t.amount;
+    map.set(key, item);
+  }
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+interface CategoryOption {
+  name: string;
 }
 
 interface DashboardProps {
@@ -118,67 +147,82 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
   const [summary, setSummary] = useState({ entree: 0, sortie: 0 });
   const [summaryLoaded, setSummaryLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selectedCategories, setSelectedCategories] = useState<CategoryOption[]>([]);
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    let query = supabase
-      .from('transactions')
-      .select('*, categories(id,type,name), designations(id,category_id,name)')
-      .order('transaction_date', { ascending: false });
-
-    if (filterMode === 'month') {
-      const start = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
-      const end = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
-      query = query.gte('transaction_date', start).lte('transaction_date', end);
-    } else if (filterMode === 'year') {
-      const start = `${selectedYear}-01-01`;
-      const end = `${selectedYear}-12-31`;
-      query = query.gte('transaction_date', start).lte('transaction_date', end);
-    } else if (filterMode === 'range') {
-      query = query.gte('transaction_date', rangeStart).lte('transaction_date', rangeEnd);
-    }
-
-    const { data } = await query;
-    setTransactions((data as Transaction[]) ?? []);
-    setLoading(false);
-  }, [filterMode, selectedMonth, selectedYear, rangeStart, rangeEnd]);
-
-  async function loadSummary() {
-    const { data } = await supabase.from('transactions').select('type, amount');
-    let entree = 0;
-    let sortie = 0;
-    for (const t of (data ?? [])) {
-      if (t.type === 'entree') entree += t.amount;
-      else sortie += t.amount;
-    }
-    setSummary({ entree, sortie });
-    setSummaryLoaded(true);
-  }
-
   useEffect(() => {
-    load();
-    void loadSummary();
-  }, [load, refreshKey]);
+    let cancelled = false;
+    (async () => {
+      let query = supabase
+        .from('transactions')
+        .select('*, categories(id,type,name), designations(id,category_id,name)')
+        .order('transaction_date', { ascending: false });
+
+      if (filterMode === 'month') {
+        const start = new Date(selectedYear, selectedMonth, 1).toISOString().split('T')[0];
+        const end = new Date(selectedYear, selectedMonth + 1, 0).toISOString().split('T')[0];
+        query = query.gte('transaction_date', start).lte('transaction_date', end);
+      } else if (filterMode === 'year') {
+        const start = `${selectedYear}-01-01`;
+        const end = `${selectedYear}-12-31`;
+        query = query.gte('transaction_date', start).lte('transaction_date', end);
+      } else if (filterMode === 'range') {
+        query = query.gte('transaction_date', rangeStart).lte('transaction_date', rangeEnd);
+      }
+
+      const { data } = await query;
+      if (cancelled) return;
+      setTransactions((data as Transaction[]) ?? []);
+      setLoading(false);
+    })();
+
+    (async () => {
+      const { data } = await supabase.from('transactions').select('type, amount');
+      if (cancelled) return;
+      let entree = 0;
+      let sortie = 0;
+      for (const t of (data ?? [])) {
+        if (t.type === 'entree') entree += t.amount;
+        else sortie += t.amount;
+      }
+      setSummary({ entree, sortie });
+      setSummaryLoaded(true);
+    })();
+
+    return () => { cancelled = true; };
+  }, [filterMode, selectedMonth, selectedYear, rangeStart, rangeEnd, refreshKey]);
 
   const totalEntree = transactions.filter(t => t.type === 'entree').reduce((s, t) => s + t.amount, 0);
   const totalSortie = transactions.filter(t => t.type === 'sortie').reduce((s, t) => s + t.amount, 0);
   const balance = totalEntree - totalSortie;
   const soldeActuel = summary.entree - summary.sortie;
 
-  // Line chart: evolution over time
-  const lineData = groupByGranularity(transactions, granularity);
+  const categoryFilterList = useMemo(() => selectedCategories.map(c => c.name), [selectedCategories]);
 
-  // Pie: sortie by category
-  const sortieByCategory: Record<string, number> = {};
-  for (const t of transactions.filter(t => t.type === 'sortie')) {
-    const catName = t.categories?.name ?? 'Autre';
-    sortieByCategory[catName] = (sortieByCategory[catName] ?? 0) + t.amount;
-  }
-  const pieData = Object.entries(sortieByCategory)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
+  // Apply category filter to transactions (for list + sommes)
+  const filteredTransactions = useMemo(() => {
+    if (categoryFilterList.length === 0) return transactions;
+    return transactions.filter(t => {
+      const catName = t.categories?.name ?? 'Autre';
+      return categoryFilterList.includes(catName);
+    });
+  }, [transactions, categoryFilterList]);
+
+  // Bar chart: evolution of entrees over time (green bars)
+  const entreeData = groupByGranularity(filteredTransactions, granularity);
+
+  // Line chart: sortie by category over time
+  const sortieCategoryData = groupByGranularityByCategory(filteredTransactions, granularity, categoryFilterList);
+
+  // List of categories present in the filtered sortie transactions
+  const allSortieCategories = useMemo(() => {
+    const names = new Set<string>();
+    for (const t of filteredTransactions) {
+      if (t.type === 'sortie') names.add(t.categories?.name ?? 'Autre');
+    }
+    return [...names];
+  }, [filteredTransactions]);
 
   return (
     <Box>
@@ -288,6 +332,21 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
                 />
               </>
             )}
+
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <Autocomplete
+                multiple
+                size="small"
+                value={selectedCategories}
+                onChange={(_, value) => setSelectedCategories(value)}
+                options={allSortieCategories.map(name => ({ name }))}
+                getOptionLabel={(option) => option.name}
+                renderInput={(params) => (
+                  <TextField {...params} label="Catégories" placeholder="Toutes" />
+                )}
+                sx={{ minWidth: 220 }}
+              />
+            </FormControl>
           </Stack>
         </CardContent>
       </Card>
@@ -307,7 +366,7 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
                     <Box>
                       <Typography variant="body2" color="text.secondary">Total Entrées</Typography>
                       <Typography variant="h5" color="success.main" fontWeight={700}>
-                        {formatAmount(totalEntree)}
+                        {formatAmount(filteredTransactions.filter(t => t.type === 'entree').reduce((s, t) => s + t.amount, 0))}
                       </Typography>
                     </Box>
                     <TrendingUpIcon sx={{ fontSize: 40, color: 'success.light' }} />
@@ -322,7 +381,7 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
                     <Box>
                       <Typography variant="body2" color="text.secondary">Total Sorties</Typography>
                       <Typography variant="h5" color="error.main" fontWeight={700}>
-                        {formatAmount(totalSortie)}
+                        {formatAmount(filteredTransactions.filter(t => t.type === 'sortie').reduce((s, t) => s + t.amount, 0))}
                       </Typography>
                     </Box>
                     <TrendingDownIcon sx={{ fontSize: 40, color: 'error.light' }} />
@@ -361,7 +420,7 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
             <>
               {/* Charts */}
               <Grid container spacing={3} sx={{ mb: 3 }}>
-                {lineData.length > 0 && (
+                {entreeData.length > 0 && (
                   <Grid size={{ xs: 12, lg: 7 }}>
                     <Card>
                       <CardContent>
@@ -375,7 +434,7 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
                             mb: 2,
                           }}
                         >
-                          <Typography variant="h6">Évolution Entrées / Sorties</Typography>
+                          <Typography variant="h6">Évolution des entrées</Typography>
                           <ButtonGroup size="small" variant="outlined">
                             <Button
                               variant={granularity === 'day' ? 'contained' : 'outlined'}
@@ -396,59 +455,61 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
                           </ButtonGroup>
                         </Box>
                         <ResponsiveContainer width="100%" height={300}>
-                          <LineChart data={lineData} margin={{ top: 5, right: 10, bottom: 20, left: 10 }}>
+                          <BarChart data={entreeData} margin={{ top: 5, right: 10, bottom: 20, left: 10 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
+                            <YAxis tickFormatter={v => new Intl.NumberFormat('fr-MG', { notation: 'compact' }).format(v as number)} />
+                            <Tooltip formatter={(v) => formatAmount(Number(v))} contentStyle={{ fontSize: 13 }} />
+                            <Bar dataKey="entree" name="Entrées" fill="#2e7d32" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                )}
+
+                {/* Line chart: sortie by category */}
+                {sortieCategoryData.length > 0 && allSortieCategories.length > 0 && (
+                  <Grid size={{ xs: 12, lg: 5 }}>
+                    <Card>
+                      <CardContent>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: 1,
+                            mb: 2,
+                          }}
+                        >
+                          <Typography variant="h6">Dépenses par catégorie</Typography>
+                        </Box>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <LineChart data={sortieCategoryData} margin={{ top: 5, right: 10, bottom: 20, left: 10 }}>
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
                             <YAxis tickFormatter={v => new Intl.NumberFormat('fr-MG', { notation: 'compact' }).format(v as number)} />
                             <Tooltip formatter={(v) => formatAmount(Number(v))} contentStyle={{ fontSize: 13 }} />
                             <Legend wrapperStyle={{ paddingTop: 16 }} />
-                            <Line type="monotone" dataKey="entree" name="Entrées" stroke="#2e7d32" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
-                            <Line type="monotone" dataKey="sortie" name="Sorties" stroke="#c62828" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                            {allSortieCategories.map((cat, i) => (
+                              <Line
+                                key={cat}
+                                type="monotone"
+                                dataKey={cat}
+                                stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                                strokeWidth={2}
+                                dot={false}
+                                activeDot={{ r: 4 }}
+                              />
+                            ))}
                           </LineChart>
                         </ResponsiveContainer>
                       </CardContent>
                     </Card>
                   </Grid>
                 )}
-                {pieData.length > 0 && (
-                  <Grid size={{ xs: 12, lg: 5 }}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom>Répartition des sorties</Typography>
-                        <ResponsiveContainer width="100%" height={300}>
-                          <PieChart>
-                            <Pie
-                              data={pieData}
-                              cx="50%"
-                              cy="45%"
-                              outerRadius={100}
-                              dataKey="value"
-                              labelLine={false}
-                            >
-                              {pieData.map((_, i) => (
-                                <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip formatter={(v) => formatAmount(Number(v))} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                )}
               </Grid>
-
-              {/* Transaction list */}
-              <Card>
-                <CardContent sx={{ p: { xs: 1, sm: 2 } }}>
-                  <Typography variant="h6" sx={{ px: 1, pb: 2 }}>
-                    Liste des transactions
-                    <Chip label={transactions.length} size="small" sx={{ ml: 1 }} />
-                  </Typography>
-                  <Divider sx={{ mb: 1 }} />
-                  <TransactionList transactions={transactions} onDelete={load} soldeActuel={soldeActuel} />
-                </CardContent>
-              </Card>
             </>
           )}
         </>
