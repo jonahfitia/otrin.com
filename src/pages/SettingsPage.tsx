@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -29,6 +28,9 @@ import { getCategoryIcon } from '../categoryIcons';
 import CategoryDialog from '../components/CategoryDialog';
 import type { CategoryFormValues } from '../components/CategoryDialog';
 import ConfirmDialog from '../components/ConfirmDialog';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
 
 export default function SettingsPage() {
   const [type, setType] = useState<TransactionType>('sortie');
@@ -43,6 +45,8 @@ export default function SettingsPage() {
   const [editingDesig, setEditingDesig] = useState<{ id: string; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
+  const [copyAlertOpen, setCopyAlertOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | number | null>(null);
 
   const isEntree = type === 'entree';
 
@@ -333,6 +337,23 @@ export default function SettingsPage() {
                         ) : (
                           <>
                             <Chip label={d.name} sx={{ flexGrow: 1, justifyContent: 'flex-start' }} />
+
+                            <IconButton
+                              size="small"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(String(d.id));
+                                  setCopiedId(d.id);
+                                  setCopyAlertOpen(true);
+                                } catch (error) {
+                                  console.error('Erreur lors de la copie de l’ID :', error);
+                                }
+                              }}
+                              aria-label="Copier l'identifiant"
+                              title={`Copier l'ID : ${d.id}`}
+                            >
+                              <ContentCopyIcon fontSize="small" />
+                            </IconButton>
                             <IconButton size="small" onClick={() => setEditingDesig({ id: d.id, name: d.name })} aria-label="modifier">
                               <EditIcon fontSize="small" />
                             </IconButton>
@@ -383,24 +404,39 @@ export default function SettingsPage() {
           </Button>
         </DialogActions>
       </Dialog>
-    {/* Delete designation confirm */}
+      {/* Delete designation confirm */}
       <ConfirmDialog
         open={!!deleteDesig}
         title="Supprimer la désignation"
         confirmLabel="Supprimer"
         cancelLabel="Annuler"
         confirmColor="error"
-      message={
-        deleteDesig ? (
-          <>
-            Supprimer la désignation <strong>{deleteDesig.name}</strong> ?
-            Les transactions existantes qui l'utilisent pourront être affectées.
-          </>
-        ) : ''
-      }
+        message={
+          deleteDesig ? (
+            <>
+              Supprimer la désignation <strong>{deleteDesig.name}</strong> ?
+              Les transactions existantes qui l'utilisent pourront être affectées.
+            </>
+          ) : ''
+        }
         onConfirm={() => void handleDeleteDesignation(deleteDesig?.id ?? '')}
         onClose={() => setDeleteDesig(null)}
       />
+      <Snackbar
+        open={copyAlertOpen}
+        autoHideDuration={2500}
+        onClose={() => setCopyAlertOpen(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setCopyAlertOpen(false)}
+          severity="success"
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          ID {copiedId} copié avec succès !
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

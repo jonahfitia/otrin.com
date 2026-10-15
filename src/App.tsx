@@ -55,7 +55,7 @@ export default function App() {
           <Toolbar>
             <AccountBalanceWalletIcon sx={{ mr: 1.5, fontSize: 28 }} />
             <Typography variant="h6" fontWeight={700} sx={{ flexGrow: 1 }}>
-              Mon Budget
+              Otrin.com
             </Typography>
             {!isMobile && (
               <Typography variant="body2" sx={{ opacity: 0.75 }} color="inherit">

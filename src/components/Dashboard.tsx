@@ -19,7 +19,7 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import FilterListIcon from '@mui/icons-material/FilterList';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
 import { supabase } from '../supabase';
 import type { Transaction } from '../supabase';
 
@@ -29,13 +29,6 @@ type Granularity = 'day' | 'week' | 'month' | 'year';
 const MONTHS = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
   'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
-];
-
-const CHART_COLORS = [
-  '#1565c0', '#1976d2', '#42a5f5', '#0288d1', '#01579b',
-  '#2e7d32', '#388e3c', '#4caf50', '#66bb6a', '#a5d6a7',
-  '#c62828', '#e53935', '#ef5350', '#ff7043', '#ffb300',
-  '#6a1b9a', '#8e24aa', '#ab47bc', '#795548', '#546e7a',
 ];
 
 function formatAmount(n: number) {
@@ -94,37 +87,6 @@ function groupByGranularity(transactions: Transaction[], granularity: Granularit
   return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
-function groupByGranularityByCategory(transactions: Transaction[], granularity: Granularity, categories: string[]): PeriodPoint[] {
-  const map = new Map<string, PeriodPoint>();
-  for (const t of transactions) {
-    if (t.type !== 'sortie') continue;
-    const catName = t.categories?.name ?? 'Autre';
-    if (categories.length > 0 && !categories.includes(catName)) continue;
-
-    const d = new Date(t.transaction_date + 'T00:00:00');
-    let key: string;
-    let label: string;
-    if (granularity === 'year') {
-      key = `${d.getFullYear()}`;
-      label = key;
-    } else if (granularity === 'month') {
-      key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
-      label = `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
-    } else if (granularity === 'week') {
-      const iso = getISOWeek(d);
-      key = `${iso.year}-W${pad2(iso.week)}`;
-      label = `S${iso.week} ${iso.year}`;
-    } else {
-      key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-      label = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
-    }
-    const item = map.get(key) ?? { key, label };
-    item[catName] = Number(item[catName] ?? 0) + t.amount;
-    map.set(key, item);
-  }
-  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
-}
-
 interface CategoryOption {
   name: string;
 }
@@ -144,8 +106,6 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
   const [rangeEnd, setRangeEnd] = useState(now.toISOString().split('T')[0]);
   const [granularity, setGranularity] = useState<Granularity>('month');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [summary, setSummary] = useState({ entree: 0, sortie: 0 });
-  const [summaryLoaded, setSummaryLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedCategories, setSelectedCategories] = useState<CategoryOption[]>([]);
 
@@ -177,26 +137,12 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
       setLoading(false);
     })();
 
-    (async () => {
-      const { data } = await supabase.from('transactions').select('type, amount');
-      if (cancelled) return;
-      let entree = 0;
-      let sortie = 0;
-      for (const t of (data ?? [])) {
-        if (t.type === 'entree') entree += t.amount;
-        else sortie += t.amount;
-      }
-      setSummary({ entree, sortie });
-      setSummaryLoaded(true);
-    })();
-
     return () => { cancelled = true; };
   }, [filterMode, selectedMonth, selectedYear, rangeStart, rangeEnd, refreshKey]);
 
   const totalEntree = transactions.filter(t => t.type === 'entree').reduce((s, t) => s + t.amount, 0);
   const totalSortie = transactions.filter(t => t.type === 'sortie').reduce((s, t) => s + t.amount, 0);
   const balance = totalEntree - totalSortie;
-  const soldeActuel = summary.entree - summary.sortie;
 
   const categoryFilterList = useMemo(() => selectedCategories.map(c => c.name), [selectedCategories]);
 
@@ -209,11 +155,27 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
     });
   }, [transactions, categoryFilterList]);
 
-  // Bar chart: evolution of entrees over time (green bars)
-  const entreeData = groupByGranularity(filteredTransactions, granularity);
+  // Combined chart data: entrée + sortie per period
+  const chartData = useMemo(
+    () => groupByGranularity(filteredTransactions, granularity),
+    [filteredTransactions, granularity]
+  );
 
-  // Line chart: sortie by category over time
-  const sortieCategoryData = groupByGranularityByCategory(filteredTransactions, granularity, categoryFilterList);
+  const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
+
+  const changeGranularity = (g: Granularity) => {
+    setGranularity(g);
+    setZoomRange(null);
+  };
+
+  const handleBrush = (range: { startIndex: number; endIndex: number }) => {
+    const last = chartData.length - 1;
+    const start = range.startIndex;
+    const end = range.endIndex;
+    setZoomRange(start === 0 && end === last ? null : [start, end]);
+  };
+
+  const resetZoom = () => setZoomRange(null);
 
   // List of categories present in the filtered sortie transactions
   const allSortieCategories = useMemo(() => {
@@ -226,39 +188,6 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
 
   return (
     <Box>
-      {/* Current balance banner */}
-      <Card sx={{ mb: 3, borderLeft: 6, borderColor: soldeActuel >= 0 ? 'success.main' : 'error.main' }}>
-        <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-            <Box>
-              <Typography variant="overline" sx={{ fontWeight: 700, letterSpacing: 1.5, color: 'text.secondary' }}>
-                Solde actuel
-              </Typography>
-              {summaryLoaded ? (
-                <Typography variant="h4" fontWeight={800} color={soldeActuel >= 0 ? 'success.main' : 'error.main'}>
-                  {formatAmount(soldeActuel)}
-                </Typography>
-              ) : (
-                <CircularProgress size={32} sx={{ mt: 1 }} />
-              )}
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 0.5 }}>
-                <Typography variant="body2" color="success.main" fontWeight={600}>
-                  + {formatAmount(summary.entree)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">cumulés</Typography>
-                <Typography variant="body2" color="error.main" fontWeight={600}>
-                  - {formatAmount(summary.sortie)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">sorties cumulées</Typography>
-              </Stack>
-            </Box>
-            <AccountBalanceWalletIcon
-              sx={{ fontSize: 56, color: soldeActuel >= 0 ? 'success.light' : 'error.light' }}
-            />
-          </Box>
-        </CardContent>
-      </Card>
-
       {/* Filter controls */}
       <Card sx={{ mb: 3 }}>
         <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
@@ -420,8 +349,8 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
             <>
               {/* Charts */}
               <Grid container spacing={3} sx={{ mb: 3 }}>
-                {entreeData.length > 0 && (
-                  <Grid size={{ xs: 12, lg: 7 }}>
+                {chartData.length > 0 && (
+                  <Grid size={{ xs: 12 }}>
                     <Card>
                       <CardContent>
                         <Box
@@ -434,76 +363,51 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
                             mb: 2,
                           }}
                         >
-                          <Typography variant="h6">Évolution des entrées</Typography>
-                          <ButtonGroup size="small" variant="outlined">
-                            <Button
-                              variant={granularity === 'day' ? 'contained' : 'outlined'}
-                              onClick={() => setGranularity('day')}
-                            >Jour</Button>
-                            <Button
-                              variant={granularity === 'week' ? 'contained' : 'outlined'}
-                              onClick={() => setGranularity('week')}
-                            >Semaine</Button>
-                            <Button
-                              variant={granularity === 'month' ? 'contained' : 'outlined'}
-                              onClick={() => setGranularity('month')}
-                            >Mois</Button>
-                            <Button
-                              variant={granularity === 'year' ? 'contained' : 'outlined'}
-                              onClick={() => setGranularity('year')}
-                            >Année</Button>
-                          </ButtonGroup>
+                          <Typography variant="h6">Entrées & Dépenses</Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                            {zoomRange && (
+                              <Button size="small" variant="text" onClick={resetZoom}>
+                                Réinitialiser le zoom
+                              </Button>
+                            )}
+                            <ButtonGroup size="small" variant="outlined">
+                              <Button
+                                variant={granularity === 'day' ? 'contained' : 'outlined'}
+                                onClick={() => changeGranularity('day')}
+                              >Jour</Button>
+                              <Button
+                                variant={granularity === 'week' ? 'contained' : 'outlined'}
+                                onClick={() => changeGranularity('week')}
+                              >Semaine</Button>
+                              <Button
+                                variant={granularity === 'month' ? 'contained' : 'outlined'}
+                                onClick={() => changeGranularity('month')}
+                              >Mois</Button>
+                              <Button
+                                variant={granularity === 'year' ? 'contained' : 'outlined'}
+                                onClick={() => changeGranularity('year')}
+                              >Année</Button>
+                            </ButtonGroup>
+                          </Box>
                         </Box>
-                        <ResponsiveContainer width="100%" height={300}>
-                          <BarChart data={entreeData} margin={{ top: 5, right: 10, bottom: 20, left: 10 }}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
-                            <YAxis tickFormatter={v => new Intl.NumberFormat('fr-MG', { notation: 'compact' }).format(v as number)} />
-                            <Tooltip formatter={(v) => formatAmount(Number(v))} contentStyle={{ fontSize: 13 }} />
-                            <Bar dataKey="entree" name="Entrées" fill="#2e7d32" radius={[4, 4, 0, 0]} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                )}
-
-                {/* Line chart: sortie by category */}
-                {sortieCategoryData.length > 0 && allSortieCategories.length > 0 && (
-                  <Grid size={{ xs: 12, lg: 5 }}>
-                    <Card>
-                      <CardContent>
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            flexWrap: 'wrap',
-                            gap: 1,
-                            mb: 2,
-                          }}
-                        >
-                          <Typography variant="h6">Dépenses par catégorie</Typography>
-                        </Box>
-                        <ResponsiveContainer width="100%" height={300}>
-                          <LineChart data={sortieCategoryData} margin={{ top: 5, right: 10, bottom: 20, left: 10 }}>
+                        <ResponsiveContainer width="100%" height={350}>
+                          <ComposedChart data={chartData} margin={{ top: 5, right: 10, bottom: 20, left: 10 }}>
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
                             <YAxis tickFormatter={v => new Intl.NumberFormat('fr-MG', { notation: 'compact' }).format(v as number)} />
                             <Tooltip formatter={(v) => formatAmount(Number(v))} contentStyle={{ fontSize: 13 }} />
                             <Legend wrapperStyle={{ paddingTop: 16 }} />
-                            {allSortieCategories.map((cat, i) => (
-                              <Line
-                                key={cat}
-                                type="monotone"
-                                dataKey={cat}
-                                stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                                strokeWidth={2}
-                                dot={false}
-                                activeDot={{ r: 4 }}
-                              />
-                            ))}
-                          </LineChart>
+                            <Bar dataKey="entree" name="Entrées" fill="#2e7d32" radius={[4, 4, 0, 0]} />
+                            <Line type="monotone" dataKey="sortie" name="Dépenses" stroke="#c62828" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                            <Brush
+                              dataKey="label"
+                              height={30}
+                              stroke="#1976d2"
+                              startIndex={zoomRange ? zoomRange[0] : 0}
+                              endIndex={zoomRange ? zoomRange[1] : chartData.length - 1}
+                              onChange={handleBrush}
+                            />
+                          </ComposedChart>
                         </ResponsiveContainer>
                       </CardContent>
                     </Card>
