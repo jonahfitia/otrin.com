@@ -21,19 +21,22 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import HistoryIcon from '@mui/icons-material/History';
 import SettingsIcon from '@mui/icons-material/Settings';
+import DownloadIcon from '@mui/icons-material/Download';
 import theme from './theme';
 import Dashboard from './components/Dashboard';
 import TransactionEntry from './pages/TransactionEntry';
 import HistoryPage from './pages/HistoryPage';
 import SettingsPage from './pages/SettingsPage';
+import ExportPage from './pages/ExportPage';
 
-type PageId = 'dashboard' | 'entry' | 'history' | 'settings';
+type PageId = 'dashboard' | 'entry' | 'history' | 'settings' | 'export';
 
 const NAV_ITEMS: { id: PageId; label: string; icon: React.ReactElement }[] = [
   { id: 'dashboard', label: 'Tableau de bord', icon: <DashboardIcon /> },
   { id: 'entry', label: 'Nouvelle', icon: <AddCircleOutlineIcon /> },
   { id: 'history', label: 'Historique', icon: <HistoryIcon /> },
   { id: 'settings', label: 'Paramètres', icon: <SettingsIcon /> },
+  { id: 'export', label: 'Exportation', icon: <DownloadIcon /> },
 ];
 
 export default function App() {
@@ -111,6 +114,7 @@ export default function App() {
               {page === 'entry' && <TransactionEntry onSuccess={handleEntrySuccess} />}
               {page === 'history' && <HistoryPage />}
               {page === 'settings' && <SettingsPage />}
+              {page === 'export' && <ExportPage />}
             </Container>
           </Box>
         </Box>
