@@ -104,7 +104,7 @@ export default function Dashboard({ refreshKey }: DashboardProps) {
     new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
   );
   const [rangeEnd, setRangeEnd] = useState(now.toISOString().split('T')[0]);
-  const [granularity, setGranularity] = useState<Granularity>('month');
+  const [granularity, setGranularity] = useState<Granularity>('day');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategories, setSelectedCategories] = useState<CategoryOption[]>([]);
